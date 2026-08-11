@@ -169,9 +169,11 @@ let elapsed = 0;
 let visualTimer;
 let statusCount = 36;
 let clockTimer;
+let lastTickAt = 0;
 const audio = new Audio();
 
 const statusText = 'online';
+const radioPlayDuration = 90;
 
 document.querySelector('#app').innerHTML = `
   <main class="hero" aria-label="Paan Wala nostalgia microsite">
@@ -237,11 +239,11 @@ function formatTime(seconds) {
 }
 
 function activeDuration() {
-  return Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : tracks[current].duration;
+  return radioPlayDuration;
 }
 
 function syncElapsed() {
-  elapsed = Number.isFinite(audio.currentTime) ? audio.currentTime : elapsed;
+  elapsed = Math.min(activeDuration(), elapsed);
 }
 
 function render() {
@@ -276,8 +278,15 @@ function stopVisualTimer() {
 
 function startVisualTimer() {
   stopVisualTimer();
+  lastTickAt = Date.now();
   visualTimer = setInterval(() => {
-    syncElapsed();
+    const now = Date.now();
+    elapsed = Math.min(activeDuration(), elapsed + (now - lastTickAt) / 1000);
+    lastTickAt = now;
+    if (elapsed >= activeDuration()) {
+      step(1, true, true);
+      return;
+    }
     render();
   }, 250);
 }
@@ -317,8 +326,17 @@ function toggle() {
   else playCurrent();
 }
 
-function step(direction, shouldKeepPlaying = playing) {
-  current = (current + direction + tracks.length) % tracks.length;
+function randomTrackIndex() {
+  if (tracks.length < 2) return current;
+  let next = current;
+  while (next === current) {
+    next = Math.floor(Math.random() * tracks.length);
+  }
+  return next;
+}
+
+function step(direction, shouldKeepPlaying = playing, shouldRandomize = false) {
+  current = shouldRandomize ? randomTrackIndex() : (current + direction + tracks.length) % tracks.length;
   loadTrack();
   if (shouldKeepPlaying) playCurrent();
   else render();
@@ -327,7 +345,9 @@ function step(direction, shouldKeepPlaying = playing) {
 function seekTo(percent) {
   const duration = activeDuration();
   const nextTime = duration * Math.max(0, Math.min(1, percent));
-  audio.currentTime = nextTime;
+  if (Number.isFinite(audio.duration) && audio.duration > 0) {
+    audio.currentTime = nextTime % audio.duration;
+  }
   elapsed = nextTime;
   render();
 }
@@ -360,10 +380,17 @@ audio.addEventListener('loadedmetadata', () => {
   render();
 });
 audio.addEventListener('timeupdate', () => {
-  syncElapsed();
   render();
 });
-audio.addEventListener('ended', () => step(1, true));
+audio.addEventListener('ended', () => {
+  if (!playing) return;
+  if (elapsed < activeDuration()) {
+    audio.currentTime = 0;
+    audio.play();
+    return;
+  }
+  step(1, true, true);
+});
 audio.addEventListener('pause', () => {
   if (playing && audio.ended) return;
   if (!audio.ended) {
